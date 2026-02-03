@@ -1,0 +1,53 @@
+# Configuration file for chemical reaction prediction
+
+# Data settings
+data:
+  num_samples: 300
+  temp_range: [10, 90]  # Celsius
+  conc_range: [0.1, 2.5]  # mol/L
+  noise_level: 0.05
+  test_size: 0.2
+  random_seed: 42
+
+# Arrhenius equation parameters
+arrhenius:
+  frequency_factor: 1.0e5
+  activation_energy: 40000  # J/mol
+  activation_energy_catalyst: 25000  # J/mol
+  gas_constant: 8.314  # J/mol·K
+
+# Model configurations
+models:
+  linear_regression:
+    enabled: true
+
+  polynomial_regression:
+    enabled: true
+    degree: 2
+
+  svr:
+    enabled: true
+    kernel: rbf
+    C: 1.0
+    epsilon: 0.1
+
+  random_forest:
+    enabled: true
+    n_estimators: 100
+    max_depth: null
+    min_samples_split: 2
+    random_state: 42
+
+# Training settings
+training:
+  cross_validation:
+    n_splits: 5
+    shuffle: true
+    random_state: 42
+
+# Paths
+paths:
+  data_dir: data/
+  models_dir: models/saved/
+  experiments_dir: experiments/
+  figures_dir: figures/
