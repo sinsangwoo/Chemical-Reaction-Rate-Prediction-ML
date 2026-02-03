@@ -11,6 +11,10 @@ rich>=13.5.0
 typer>=0.9.0
 pydantic>=2.0.0
 
+# Phase 2: Chemistry data handling
+requests>=2.31.0
+tqdm>=4.66.0
+
 # Development
 pytest>=7.4.0
 pytest-cov>=4.1.0
@@ -19,7 +23,7 @@ ruff>=0.0.285
 mypy>=1.5.0
 pre-commit>=3.3.0
 
-# Optional: For future phases
-# rdkit>=2023.3.1
-# torch>=2.0.0
-# torch-geometric>=2.3.0
+# Phase 3 (Future): Deep learning for chemistry
+# rdkit>=2023.3.1  # Molecular informatics (requires conda)
+# torch>=2.0.0  # Deep learning
+# torch-geometric>=2.3.0  # Graph neural networks
