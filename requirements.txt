@@ -23,7 +23,12 @@ ruff>=0.0.285
 mypy>=1.5.0
 pre-commit>=3.3.0
 
-# Phase 3 (Future): Deep learning for chemistry
-# rdkit>=2023.3.1  # Molecular informatics (requires conda)
-# torch>=2.0.0  # Deep learning
-# torch-geometric>=2.3.0  # Graph neural networks
+# Phase 3: Graph Neural Networks (OPTIONAL - install separately)
+# These are optional dependencies for advanced GNN features
+# Install with: pip install torch torch-geometric
+# 
+# torch>=2.0.0
+# torch-geometric>=2.3.0
+# 
+# For RDKit (accurate molecular graphs):
+# conda install -c conda-forge rdkit
