@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: chem-ml-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-chemml}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-chemical_ml}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - chem-ml-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-chemml}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # FastAPI Backend
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chem-ml-api
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-chemml}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-chemical_ml}
+      - SECRET_KEY=${SECRET_KEY:-please-change-this-secret-key}
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - chem-ml-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # React Frontend (Production Build)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: chem-ml-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+    networks:
+      - chem-ml-network
+    restart: unless-stopped
+
+networks:
+  chem-ml-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
