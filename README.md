@@ -5,93 +5,91 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-> Enterprise-grade machine learning platform for chemical reaction kinetics prediction with uncertainty quantification and interpretable AI.
+A machine learning platform for predicting chemical reaction kinetics. Combines Graph Neural Networks with physics-informed learning to model reaction rates, activation energies, and time-resolved concentration profiles.
 
 ---
 
-## Overview
+## What it does
 
-A production-ready platform combining Graph Neural Networks (GNNs) with physics-informed learning to predict chemical reaction rates. Features include Bayesian uncertainty quantification, few-shot learning for rare reactions, and industry-specific transfer learning.
+**v1 — Rate prediction**
+Given reactants, products, and conditions, predict the reaction rate constant k with calibrated uncertainty.
 
-**Key Capabilities**:
-- **8 State-of-the-Art Models**: RandomForest, XGBoost, GCN, GAT, GIN, MPNN, Bayesian GNN, Deep Ensemble
-- **Uncertainty Quantification**: MC Dropout, Bayesian inference, Conformal prediction
-- **Physics-Informed Learning**: Hybrid Arrhenius-GNN architecture
-- **Few-Shot Learning**: Adapt to new reaction types with 5-10 examples
-- **Interpretable AI**: Attention mechanisms, activation energy extraction
-- **Production Deployment**: REST API, React frontend, Docker support
+**v2 — Multi-step kinetic simulation** *(new)*
+Build an elementary reaction network (Reaction Path Graph), identify the rate-determining step, and run a Kinetic Monte Carlo simulation to compute time-resolved concentration profiles with Bayesian confidence intervals.
 
 ---
 
-## Quick Start
-
-### Prerequisites
+## Installation
 
 ```bash
-Python 3.10+
-PyTorch 2.0+
-RDKit
-Node.js 18+ (for frontend)
-```
-
-### Installation
-
-```bash
-# Clone repository
 git clone https://github.com/sinsangwoo/Chemical-Reaction-Rate-Prediction-ML.git
 cd Chemical-Reaction-Rate-Prediction-ML
-
-# Install dependencies
 pip install -r requirements.txt
+```
 
-# Initialize database (optional)
+Optional — initialize the database:
+```bash
 python -c "from api.database import init_db; init_db()"
 ```
 
-### Basic Usage
+Frontend:
+```bash
+cd frontend && npm install && npm run dev
+```
 
-**Python API**:
+Requirements: Python 3.10+, PyTorch 2.0+, RDKit, Node.js 18+
+
+---
+
+## Quick start
+
+**Rate prediction (v1)**
 
 ```python
 from src.models.gnn import GINModel
 import torch
 
-# Initialize model
 model = GINModel(node_features=37, hidden_dim=128)
-
-# Prepare data
-x = torch.randn(1, 37)  # Molecular features
-prediction = model(x)
-
-print(f"Predicted rate: {prediction.item():.4f} mol/L·s")
+x = torch.randn(1, 37)
+k = model(x)
+print(f"k = {k.item():.4f} mol/L·s")
 ```
 
-**REST API**:
+**KMC simulation (v2)**
+
+```python
+from src.models.rpg import ReactionPathGraph
+from src.simulation import KMCSolver
+
+rpg = ReactionPathGraph(temperature=500.0)
+rpg.build_from_smiles(
+    reactants=["CCO"],
+    products=["CC=O"],
+    intermediates=["CC[OH2+]"],
+    ea_values=[80.0, 55.0],   # kJ/mol
+    a_values=[1e13, 1e12],
+)
+rpg.mark_rate_determining_step()
+
+solver = KMCSolver(rpg, max_time=1e-6, n_trajectories=50)
+result = solver.run({"n0": 1.0})
+print(f"Max yield {result.max_yield:.1%} at t = {result.max_yield_time:.2e} s")
+```
+
+**REST API**
 
 ```bash
-# Start server
 uvicorn api.main:app --reload
 
-# Make prediction
-curl -X POST "http://localhost:8000/predict" \
+# Single prediction
+curl -X POST http://localhost:8000/predict \
   -H "Content-Type: application/json" \
-  -d '{
-    "reaction": {
-      "reactants": ["CCO"],
-      "products": ["CC=O"],
-      "conditions": {"temperature": 100}
-    },
-    "model_type": "gin"
-  }'
-```
+  -d '{"reaction": {"reactants": ["CCO"], "products": ["CC=O"], "conditions": {"temperature": 500}}, "model_type": "gin"}'
 
-**Web Interface**:
-
-```bash
-cd frontend
-npm install
-npm run dev
-# Open http://localhost:3000
+# KMC simulation
+curl -X POST http://localhost:8000/simulate/kmc \
+  -H "Content-Type: application/json" \
+  -d '{"reactants": ["CCO"], "products": ["CC=O"], "intermediates": ["CC[OH2+]"], "temperature": 500, "max_time": 1e-6, "n_trajectories": 50}'
 ```
 
 ---
@@ -99,414 +97,197 @@ npm run dev
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│           React Frontend (TypeScript)       │
-│  Real-time validation | Interactive charts  │
-└──────────────────┬──────────────────────────┘
-                   │ REST API (JWT)
-┌──────────────────▼──────────────────────────┐
-│              FastAPI Backend                │
-│     OpenAPI docs | Batch processing        │
-└──────────────────┬──────────────────────────┘
-                   │ SQLAlchemy ORM
-┌──────────────────▼──────────────────────────┐
-│          PostgreSQL Database                │
-│   User management | Prediction history      │
-└─────────────────────────────────────────────┘
-
-          ┌──────────────────────┐
-          │   ML Model Layer     │
-          ├──────────────────────┤
-          │ • GNN Models         │
-          │   (GCN, GAT, GIN)    │
-          │ • Bayesian Methods   │
-          │   (MC Dropout, BBB)  │
-          │ • Hybrid Physics     │
-          │   (Arrhenius-GNN)    │
-          └──────────────────────┘
+React Frontend
+  SimulationPanel
+    ├── ReactionPathGraph      SVG node-link network, RDS highlighted
+    ├── EnergyProfileChart     Gibbs ΔG profile, CI band, RDS marker
+    └── ConcentrationDashboard KMC time-series, 95 % CI shadow areas
+  [legacy] PredictionTab | AnalyticsTab | ModelsTab
+        │
+        │ REST API
+        ▼
+FastAPI Backend
+  POST /predict          v1 rate prediction
+  POST /simulate/rpg     build Reaction Path Graph
+  POST /simulate/kmc     run KMC simulation
+        │
+        ├── src/models/rpg/        ReactionPathGraph, ElementaryReaction
+        ├── src/simulation/        KMCSolver (Gillespie), arrhenius_utils
+        └── src/models/novel/      MultiStepHybridGNN, MultiTaskKineticLoss
 ```
 
 ---
 
-## Model Performance
+## Models
 
-### Benchmark Results (USPTO Dataset)
+| Model | R² | MAE | Inference |
+|---|---|---|---|
+| GIN | 0.985 | 0.050 | 52 ms |
+| MPNN | 0.940 | 0.080 | 65 ms |
+| GAT | 0.930 | 0.090 | 58 ms |
+| GCN | 0.910 | 0.110 | 48 ms |
+| XGBoost | 0.850 | 0.130 | 28 ms |
+| RandomForest | 0.820 | 0.150 | 22 ms |
+| Bayesian Ensemble | 0.985 | 0.052 | 245 ms |
 
-| Model | R² Score | MAE | RMSE | Inference (ms) |
-|-------|----------|-----|------|----------------|
-| **GIN** | **0.985** | 0.050 | 0.068 | 52 |
-| GAT | 0.930 | 0.090 | 0.112 | 58 |
-| MPNN | 0.940 | 0.080 | 0.098 | 65 |
-| GCN | 0.910 | 0.110 | 0.125 | 48 |
-| RandomForest | 0.820 | 0.150 | 0.185 | 22 |
-| XGBoost | 0.850 | 0.130 | 0.165 | 28 |
-| **Bayesian Ensemble** | **0.985** | 0.052 | 0.070 | 245 |
-
-**Best Single Model**: GIN (R² = 0.985, 52ms inference)  
-**Best Uncertainty**: Bayesian Ensemble (calibrated predictions)
-
-### Novel Contributions Performance
-
-| Innovation | Metric | Improvement vs Baseline |
-|------------|--------|-------------------------|
-| Hybrid Physics-GNN | R² Score | +18% (0.95 vs 0.82) |
-| Hybrid Physics-GNN | Data Requirements | -90% (1K vs 10K) |
-| Few-Shot Learning | Training Examples | -99% (5 vs 1000) |
-| Industry Fine-Tuning | Domain Adaptation | -99% data per domain |
+Benchmarked on the USPTO dataset.
 
 ---
 
-## Key Features
+## Key modules
 
-### 1. Graph Neural Networks
+### Reaction Path Graph (`src/models/rpg`)
 
-**Architectures**:
-- **GCN** (Graph Convolutional Network): Spectral convolutions
-- **GAT** (Graph Attention Network): Attention-based aggregation
-- **GIN** (Graph Isomorphism Network): WL-test powerful
-- **MPNN** (Message Passing NN): Flexible message passing
+Builds a directed acyclic graph of elementary steps from SMILES input. Each edge carries GNN-predicted Ea and A values; `mark_rate_determining_step()` identifies the highest-barrier step.
 
-**Implementation**:
-```python
-from src.models.gnn import GINModel
+### KMC Solver (`src/simulation`)
 
-model = GINModel(
-    node_features=37,
-    hidden_dim=128,
-    num_layers=3,
-    dropout=0.1
-)
-```
+Gillespie-algorithm simulator. Runs N independent trajectories with Ea sampled from the Bayesian uncertainty distribution, then aggregates to produce mean concentrations and 95 % confidence intervals. Returns `max_yield_time` — the optimal reaction time at the given temperature.
 
-### 2. Uncertainty Quantification
+### MultiStepHybridGNN (`src/models/novel/hybrid_model_v2.py`)
 
-**Methods**:
-- **MC Dropout**: 100 forward passes with dropout
-- **Bayesian Neural Networks**: Variational inference
-- **Deep Ensemble**: 5 independent models
-- **Conformal Prediction**: Distribution-free intervals
+Extends the v1 HybridGNN with two output heads:
+- **Ea head** — activation energy per elementary step (kJ/mol), lower-bounded via Softplus
+- **ln(A) head** — log pre-exponential factor, exponentiated before use
 
-**Usage**:
-```python
-from src.models.uncertainty import MCDropoutGNN
+`predict_with_uncertainty(x, T)` runs MC Dropout over 50 samples and returns `(k_mean, Ea_mean, A_mean, Ea_std, A_std)`. Output is directly compatible with `ReactionPathGraph.build_from_smiles()`.
 
-model = MCDropoutGNN()
-prediction, uncertainty = model.predict_with_uncertainty(
-    x, n_samples=100
-)
+### MultiTaskKineticLoss (`src/models/novel/multi_task_loss.py`)
 
-print(f"Prediction: {prediction:.4f} ± {uncertainty:.4f}")
-```
-
-### 3. Hybrid Physics-Informed Learning
-
-**Innovation**: Combines Arrhenius equation with GNN
-
-```python
-from src.models.novel import HybridGNN
-
-model = HybridGNN()
-k = model(x, temperature)
-Ea = model.get_activation_energy(x, temperature)
-
-print(f"Rate: {k.item():.4f}")
-print(f"Activation Energy: {Ea.item():.2f} kJ/mol")
-```
-
-**Advantages**:
-- Physically consistent predictions
-- Better extrapolation beyond training range
-- Interpretable activation energies
-- 90% less training data required
-
-### 4. Few-Shot Learning
-
-**Capability**: Learn new reaction types with 5-10 examples
-
-```python
-from src.models.novel import FewShotLearner
-
-learner = FewShotLearner(method='maml')
-
-# Support set: only 5 examples!
-support_x, support_y = get_few_examples(n=5)
-
-# Predict on 100 new reactions
-predictions = learner.predict(
-    query_x, support_x, support_y
-)
-```
-
-**Applications**:
-- New drug synthesis reactions
-- Rare catalyst systems
-- Proprietary industrial processes
-- Rapid prototyping
-
-### 5. Interpretable AI
-
-**Methods**:
-- Attention visualization
-- Integrated gradients
-- Activation energy extraction
-- Reaction mechanism identification
-
-```python
-from src.models.novel import AttentionGNN, ReactionMechanismExplainer
-
-model = AttentionGNN()
-pred, attention = model(x, return_attention=True)
-
-explainer = ReactionMechanismExplainer(model)
-insights = explainer.explain_prediction(x, temperature)
-
-print(f"Rate-determining step: {insights['mechanism']['rate_determining_step']}")
-print(f"Key features: {insights['top_features']}")
-```
-
-### 6. Industry-Specific Transfer Learning
-
-**Domains**:
-- Pharmaceutical (FDA-regulated)
-- Agrochemical (EPA-compliant)
-- Polymer synthesis
-- Specialty chemicals
-
-```python
-from src.models.novel import TransferLearningPipeline, IndustryDomain
-
-pipeline = TransferLearningPipeline(
-    pretrained_model,
-    domain=IndustryDomain.PHARMACEUTICAL
-)
-
-model = pipeline.prepare_model(strategy='fine_tuning')
-# Train on only 100 company-specific reactions
-```
-
-**Features**:
-- Federated learning (privacy-preserving)
-- 99% data reduction per domain
-- Competitive advantage preservation
-- Regulatory compliance
+Kendall et al. (2018) homoscedastic uncertainty weighting over three objectives: Ea MSE, ln(A) MSE, and log-k MSE. Loss weights are learned automatically during training.
 
 ---
 
-## Project Structure
+## Project structure
 
 ```
 .
-├── api/                        # FastAPI backend
-│   ├── main.py                 # API entry point
-│   ├── models.py               # Pydantic schemas
-│   ├── database.py             # SQLAlchemy models
-│   ├── auth.py                 # JWT authentication
-│   └── routes/                 # API endpoints
-├── frontend/                   # React application
-│   ├── src/
-│   │   ├── components/         # React components
-│   │   └── lib/api.ts          # API client
-│   └── public/
-├── src/                        # Core ML library
-│   ├── data/                   # Data processing
-│   ├── features/               # Feature engineering
-│   └── models/
-│       ├── gnn/                # Graph neural networks
-│       ├── uncertainty/        # Bayesian methods
-│       └── novel/              # Novel contributions
-│           ├── hybrid_model.py
-│           ├── few_shot_learning.py
-│           ├── interpretable_gnn.py
-│           └── industry_finetuning.py
-├── experiments/                # Benchmarks & analysis
-│   ├── benchmark.py            # Model comparison
-│   ├── statistical_analysis.py # Significance testing
-│   └── ablation_study.py       # Component analysis
-├── tests/                      # Test suite
-├── docs/                       # Documentation
-└── README.md
+├── api/
+│   ├── main.py
+│   ├── routes/
+│   │   └── simulation.py       POST /simulate/rpg, POST /simulate/kmc
+│   ├── models.py
+│   ├── database.py
+│   └── auth.py
+├── src/
+│   ├── models/
+│   │   ├── rpg/                ReactionPathGraph, ElementaryReaction
+│   │   ├── gnn/                GCN, GAT, GIN, MPNN
+│   │   ├── uncertainty/        MC Dropout, Bayesian, Conformal
+│   │   └── novel/
+│   │       ├── hybrid_model.py        v1 HybridGNN
+│   │       ├── hybrid_model_v2.py     v2 MultiStepHybridGNN
+│   │       ├── multi_task_loss.py
+│   │       ├── few_shot_learning.py
+│   │       ├── interpretable_gnn.py
+│   │       └── industry_finetuning.py
+│   ├── simulation/
+│   │   ├── kmc_solver.py
+│   │   └── arrhenius_utils.py
+│   └── data/
+│       └── reaction_network_dataset.py
+├── frontend/
+│   └── src/
+│       ├── components/
+│       │   ├── SimulationPanel.tsx
+│       │   ├── ReactionPathGraph.tsx
+│       │   ├── EnergyProfileChart.tsx
+│       │   └── ConcentrationDashboard.tsx
+│       └── lib/
+│           ├── api.ts
+│           └── simulation-api.ts
+├── tests/
+│   ├── simulation/
+│   │   ├── test_kmc_solver.py
+│   │   └── test_rpg.py
+│   ├── models/
+│   │   └── test_hybrid_model_v2.py
+│   ├── data/
+│   │   └── test_reaction_network_dataset.py
+│   └── integration/
+│       └── test_kmc_pipeline.py
+├── experiments/
+│   ├── benchmark.py
+│   ├── statistical_analysis.py
+│   └── ablation_study.py
+├── docs/
+│   ├── ARCHITECTURE.md
+│   └── DEPLOYMENT.md
+└── configs/
 ```
 
 ---
 
-## Development
+## API endpoints
 
-### Running Tests
+| Method | Path | Description |
+|---|---|---|
+| POST | `/predict` | Single reaction rate prediction |
+| POST | `/predict/batch` | Batch prediction (up to 100) |
+| GET | `/models` | List available models |
+| POST | `/simulate/rpg` | Build Reaction Path Graph |
+| POST | `/simulate/kmc` | Run KMC simulation |
+| GET | `/health` | Health check |
+
+Interactive docs at `http://localhost:8000/docs` after starting the server.
+
+---
+
+## Tests
 
 ```bash
-# Unit tests
+# All tests
 pytest tests/ -v
+
+# Unit tests only
+pytest tests/models/ tests/simulation/ tests/data/ -v
+
+# Integration
+pytest tests/integration/ -v
 
 # With coverage
 pytest tests/ --cov=src --cov-report=html
-
-# Specific module
-pytest tests/models/test_gnn.py -v
-```
-
-### Code Quality
-
-```bash
-# Formatting
-black src/ tests/
-isort src/ tests/
-
-# Linting
-flake8 src/ tests/
-pylint src/
-
-# Type checking
-mypy src/
-```
-
-### Benchmarking
-
-```bash
-# Run complete benchmark suite
-python experiments/benchmark.py
-
-# Statistical analysis
-python experiments/statistical_analysis.py results.csv
-
-# Ablation studies
-python experiments/ablation_study.py
-
-# Novel contributions demo
-python experiments/novel_contributions_demo.py
 ```
 
 ---
 
-## Production Deployment
+## Deployment
 
-### Docker Compose
-
+**Docker**
 ```bash
-# Production stack
 docker-compose -f docker-compose.prod.yml up -d
-
-# Check health
-curl http://localhost:8000/health
-curl http://localhost/
 ```
 
-### Cloud Deployment
-
-**Railway** (Recommended):
+**Railway**
 ```bash
-npm i -g @railway/cli
-railway login
-railway init
-railway up
+npm i -g @railway/cli && railway login && railway up
 ```
 
-**AWS**:
-- ECS Fargate (backend)
-- CloudFront + S3 (frontend)
-- RDS PostgreSQL (database)
-
-See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for detailed guides.
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for AWS and Vercel guides.
 
 ---
 
-## API Documentation
+## Stack
 
-### Interactive Docs
-
-Start the API server and visit:
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
-
-### Key Endpoints
-
-**Prediction**:
-```http
-POST /predict
-Content-Type: application/json
-Authorization: Bearer <token>
-
-{
-  "reaction": {
-    "reactants": ["CCO", "CC(=O)O"],
-    "products": ["CCOC(=O)C"],
-    "conditions": {"temperature": 80.0}
-  },
-  "model_type": "gin",
-  "uncertainty_method": "mc_dropout"
-}
-```
-
-**Batch Prediction**:
-```http
-POST /predict/batch
-# Up to 100 reactions
-```
-
-**Model Listing**:
-```http
-GET /models
-```
-
-**Health Check**:
-```http
-GET /health
-```
-
----
-
-## Performance Benchmarks
-
-### Latency
-
-| Endpoint | p50 | p95 | p99 |
-|----------|-----|-----|-----|
-| /health | 2ms | 5ms | 10ms |
-| /predict (RF) | 20ms | 35ms | 50ms |
-| /predict (GNN) | 50ms | 85ms | 120ms |
-| /predict (Ensemble) | 250ms | 380ms | 500ms |
-
-### Throughput
-
-- Single instance: ~200 req/s (GNN)
-- With scaling: 1000+ req/s
-
-### Accuracy
-
-- R² Score: 0.985 (GIN)
-- MAE: 0.05 mol/L·s
-- Calibrated uncertainty (Bayesian)
-
----
-
-## Contributing
-
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-**Development Process**:
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open Pull Request
-
-**Guidelines**:
-- Follow PEP 8 style guide
-- Add tests for new features
-- Update documentation
-- Ensure CI/CD passes
+| Layer | Technology |
+|---|---|
+| ML | PyTorch 2.0+, PyTorch Geometric |
+| Chemistry | RDKit |
+| Backend | FastAPI, SQLAlchemy, PostgreSQL |
+| Auth | JWT (python-jose) |
+| Frontend | React 18, TypeScript, Vite, Tailwind CSS, Recharts |
+| DevOps | Docker, GitHub Actions, Railway |
 
 ---
 
 ## Citation
 
-If you use this platform in your research or production, please cite:
-
 ```bibtex
 @software{chemical_reaction_ml_platform,
-  title = {Chemical Reaction Rate Prediction Platform},
+  title  = {Chemical Reaction Rate Prediction Platform},
   author = {Sin Sang Woo},
-  year = {2026},
-  url = {https://github.com/sinsangwoo/Chemical-Reaction-Rate-Prediction-ML}
+  year   = {2026},
+  url    = {https://github.com/sinsangwoo/Chemical-Reaction-Rate-Prediction-ML}
 }
 ```
 
@@ -514,79 +295,4 @@ If you use this platform in your research or production, please cite:
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
-
----
-
-## Technology Stack
-
-### Backend
-- **Framework**: FastAPI 0.104+
-- **ML**: PyTorch 2.0+, PyTorch Geometric
-- **Chemistry**: RDKit
-- **Database**: PostgreSQL, SQLAlchemy
-- **Auth**: JWT (python-jose)
-
-### Frontend
-- **Framework**: React 18, TypeScript
-- **Build**: Vite
-- **Styling**: Tailwind CSS
-- **State**: React Query
-- **Charts**: Recharts
-
-### DevOps
-- **Containerization**: Docker
-- **CI/CD**: GitHub Actions
-- **Hosting**: Railway, Vercel, AWS
-- **Monitoring**: Prometheus, Grafana
-
----
-
-## Support
-
-- **Documentation**: [docs/](docs/)
-- **Issues**: [GitHub Issues](https://github.com/sinsangwoo/Chemical-Reaction-Rate-Prediction-ML/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/sinsangwoo/Chemical-Reaction-Rate-Prediction-ML/discussions)
-
----
-
-## Roadmap
-
-### Current (v1.0)
-- [x] 8 ML models with uncertainty
-- [x] REST API with authentication
-- [x] React frontend
-- [x] Cloud deployment ready
-- [x] Novel contributions (4)
-
-### Upcoming (v1.1)
-- [ ] Molecule structure drawing (RDKit.js)
-- [ ] 3D molecular visualization
-- [ ] Batch CSV upload
-- [ ] Export results (CSV/PDF)
-
-### Future (v2.0)
-- [ ] Quantum chemistry integration
-- [ ] Multi-step synthesis planning
-- [ ] Mobile app (React Native)
-- [ ] AutoML for hyperparameter tuning
-
----
-
-## Acknowledgments
-
-- PyTorch Geometric team for GNN library
-- RDKit developers for chemistry toolkit
-- FastAPI framework
-- Open Reaction Database (ORD)
-- USPTO patent database
-
----
-
-<div align="center">
-
-**Built with ❤️ for chemists and ML engineers**
-
-[Documentation](docs/) • [API Docs](http://localhost:8000/docs) • [Deployment Guide](docs/DEPLOYMENT.md)
-
-</div>
+MIT — see [LICENSE](LICENSE).
