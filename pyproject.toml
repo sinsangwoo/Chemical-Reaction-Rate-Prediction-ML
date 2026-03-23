@@ -25,13 +25,20 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
+# -------------------------------------------------------------------------
+# Phase 1 — CLI entry point
+# After `pip install -e .`, users can type `chem-rate` in their terminal.
+# -------------------------------------------------------------------------
+[project.scripts]
+chem-rate = "src.cli.main:entry_point"
+
 [project.urls]
 Repository = "https://github.com/sinsangwoo/Chemical-Reaction-Rate-Prediction-ML"
 Homepage = "https://github.com/sinsangwoo/Chemical-Reaction-Rate-Prediction-ML"
 "Bug Tracker" = "https://github.com/sinsangwoo/Chemical-Reaction-Rate-Prediction-ML/issues"
 
 [tool.setuptools.packages.find]
-where = ["."]  
+where = ["."]
 include = ["src*"]
 
 [tool.black]
@@ -75,4 +82,4 @@ testpaths = ["tests"]
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
-addopts = "-v --cov=src --cov-report=html --cov-report=term-missing"
+addopts = "-v --tb=short"
