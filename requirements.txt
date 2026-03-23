@@ -7,13 +7,17 @@ seaborn>=0.12.0
 
 # Utilities
 pyyaml>=6.0
-rich>=13.5.0
-typer>=0.9.0
 pydantic>=2.0.0
-
-# Phase 2: Chemistry data handling
 requests>=2.31.0
 tqdm>=4.66.0
+
+# -------------------------------------------------------------------------
+# Phase 1 — CLI dependencies
+# These three are required for the `chem-rate` CLI to function.
+# -------------------------------------------------------------------------
+rich>=13.5.0          # terminal rendering (tables, panels, syntax)
+typer>=0.9.0          # CLI framework (built on Click)
+plotext>=5.2.8        # ASCII / Unicode charts in the terminal
 
 # Web Application
 streamlit>=1.28.0
@@ -30,9 +34,9 @@ pre-commit>=3.3.0
 # Phase 3: Graph Neural Networks (OPTIONAL - install separately)
 # These are optional dependencies for advanced GNN features
 # Install with: pip install torch torch-geometric
-# 
+#
 # torch>=2.0.0
 # torch-geometric>=2.3.0
-# 
+#
 # For RDKit (accurate molecular graphs):
 # conda install -c conda-forge rdkit

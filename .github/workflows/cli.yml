@@ -1,0 +1,206 @@
+name: CLI CI — Phase 1
+
+# Trigger on every push to the phase-1 feature branch and on any
+# pull request that targets main.  This workflow is intentionally
+# separate from the existing ci.yml so failures are easy to triage.
+on:
+  push:
+    branches:
+      - feature/phase1-cli-scaffold
+      - feature/phase*
+  pull_request:
+    branches:
+      - main
+    paths:
+      # Only run when CLI-related files change
+      - 'src/cli/**'
+      - 'tests/cli/**'
+      - 'pyproject.toml'
+      - 'requirements.txt'
+      - '.github/workflows/cli.yml'
+
+# Cancel any in-progress run for the same branch so we don't waste
+# runner minutes on stale commits.
+concurrency:
+  group: cli-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Job 1: lint
+  # Run fast style/type checks before spending time on tests.
+  # -------------------------------------------------------------------------
+  lint:
+    name: Lint (ruff + black)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: lint-${{ hashFiles('requirements.txt') }}
+
+      - name: Install lint tools
+        run: |
+          pip install --upgrade pip
+          pip install black ruff
+
+      - name: ruff
+        run: ruff check src/cli/ tests/cli/
+
+      - name: black (check only)
+        run: black --check src/cli/ tests/cli/
+
+  # -------------------------------------------------------------------------
+  # Job 2: test
+  # Matrix across Python 3.9 / 3.10 / 3.11, without heavy ML deps.
+  # -------------------------------------------------------------------------
+  test:
+    name: Test Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    needs: lint
+    strategy:
+      fail-fast: false   # See all failures, not just the first
+      matrix:
+        python-version: ['3.9', '3.10', '3.11']
+        os: [ubuntu-latest]
+        include:
+          # Smoke-test on Windows with the latest Python only
+          - os: windows-latest
+            python-version: '3.11'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~\AppData\Local\pip\Cache
+          key: test-${{ matrix.os }}-${{ matrix.python-version }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: test-${{ matrix.os }}-${{ matrix.python-version }}-
+
+      - name: Install CLI dependencies
+        # We install only CLI deps (no torch/rdkit) to keep the job fast.
+        # If any heavy dep is accidentally imported, the test will fail here.
+        run: |
+          pip install --upgrade pip
+          pip install typer rich plotext pytest pytest-cov
+          pip install -e . --no-deps
+
+      - name: Run CLI unit tests
+        run: |
+          pytest tests/cli/ -v --tb=short \
+            --cov=src/cli \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage-cli.xml
+
+      - name: Upload coverage
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+        uses: codecov/codecov-action@v4
+        continue-on-error: true
+        with:
+          files: coverage-cli.xml
+          flags: cli
+          fail_ci_if_error: false
+
+  # -------------------------------------------------------------------------
+  # Job 3: smoke — verify the `chem-rate` entry point installs and runs
+  # -------------------------------------------------------------------------
+  smoke:
+    name: Smoke test — entry point
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install package
+        run: |
+          pip install --upgrade pip
+          pip install typer rich plotext
+          pip install -e .
+
+      - name: chem-rate --help
+        run: chem-rate --help
+
+      - name: chem-rate version
+        run: chem-rate version
+
+      - name: chem-rate info system
+        run: chem-rate info system
+
+      - name: chem-rate info deps
+        run: chem-rate info deps
+
+      - name: chem-rate validate smiles CCO
+        run: chem-rate validate smiles CCO
+
+      - name: chem-rate validate smiles reaction arrow
+        run: chem-rate validate smiles 'CCO>>CC=O'
+
+      - name: chem-rate validate temperature 500
+        run: chem-rate validate temperature 500
+
+      # --- Edge-case smoke tests (should exit non-zero) --------------------
+
+      - name: Invalid SMILES exits non-zero
+        run: |
+          chem-rate validate smiles '[NH4' && exit 1 || exit 0
+
+      - name: Negative temperature exits non-zero
+        run: |
+          chem-rate validate temperature -- -10 && exit 1 || exit 0
+
+      - name: Above-max temperature exits non-zero
+        run: |
+          chem-rate validate temperature 9999 && exit 1 || exit 0
+
+  # -------------------------------------------------------------------------
+  # Job 4: build — ensure the wheel builds cleanly (regression guard)
+  # -------------------------------------------------------------------------
+  build:
+    name: Build wheel
+    runs-on: ubuntu-latest
+    needs: smoke
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build
+        run: |
+          pip install build
+          python -m build
+
+      - name: Verify wheel contains chem-rate script
+        run: |
+          pip install dist/*.whl
+          chem-rate --help
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chem-rate-wheel-phase1
+          path: dist/
+          retention-days: 7
