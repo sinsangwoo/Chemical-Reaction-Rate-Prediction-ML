@@ -429,7 +429,7 @@ def create_uncertainty_model(
     elif model_type == 'bayesian':
         return BayesianGNN(**kwargs)
     elif model_type == 'ensemble':
-        from src.models.gnn.gnn_models import GCNModel
+        from chemdynamics.graphs.gnn_models import GCNModel
         return DeepEnsembleGNN(GCNModel, **kwargs)
     else:
         raise ValueError(f"Unknown model type: {model_type}")

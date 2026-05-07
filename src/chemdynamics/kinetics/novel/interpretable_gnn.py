@@ -54,22 +54,33 @@ class AttentionGNN(nn.Module):
         """
         super().__init__()
         
-        # Simplified version for demonstration
-        self.encoder = nn.Sequential(
-            nn.Linear(node_features, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout)
+        # Real GAT Convolution layers from torch_geometric.
+        # This replaces the placeholder MLP with a legitimate attention-based GNN.
+        # Design Intent: 
+        # By using GATConv, the attention mechanism is learned per-edge (atom-atom),
+        # allowing for scientifically valid molecular substructure importance extraction.
+        self.gat_layers = nn.ModuleList()
+        
+        # First layer: input to hidden
+        self.gat_layers.append(
+            GATConv(node_features, hidden_dim, heads=heads, dropout=dropout)
         )
         
-        # Attention layer
-        self.attention = nn.Sequential(
-            nn.Linear(hidden_dim, heads),
-            nn.Softmax(dim=1)
-        )
+        # Hidden layers
+        for _ in range(num_layers - 2):
+            self.gat_layers.append(
+                GATConv(hidden_dim * heads, hidden_dim, heads=heads, dropout=dropout)
+            )
+            
+        # Final GAT layer (single head for global representation)
+        if num_layers > 1:
+            self.gat_layers.append(
+                GATConv(hidden_dim * heads, hidden_dim, heads=1, dropout=dropout)
+            )
         
-        # Predictor
+        # Global Predictor: Transforms graph-level features into rate predictions
         self.predictor = nn.Sequential(
-            nn.Linear(hidden_dim * heads, hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, 1)
         )
@@ -78,34 +89,43 @@ class AttentionGNN(nn.Module):
     
     def forward(
         self, 
-        x: torch.Tensor,
+        data: Any,
         return_attention: bool = False
     ) -> torch.Tensor:
-        """Forward pass with attention.
+        """Forward pass with graph attention.
         
         Args:
-            x: Node features [batch, node_features]
+            data: PyTorch Geometric Data object containing:
+                  - x: Node features
+                  - edge_index: Graph topology
+                  - batch: Batch assignments
             return_attention: If True, return attention weights
         
         Returns:
             Predictions (and attention if requested)
         """
-        # Encode
-        h = self.encoder(x)
+        x, edge_index = data.x, data.edge_index
         
-        # Attention
-        attention = self.attention(h)  # [batch, heads]
-        self.attention_weights = attention.detach()
+        # Apply GAT layers
+        # GATConv can return attention weights internally if requested.
+        # Here we capture the attention for interpretability.
+        for i, conv in enumerate(self.gat_layers):
+            # Capture attention weights from the last layer for visualization
+            if i == len(self.gat_layers) - 1:
+                x, (edge_idx, att) = conv(x, edge_index, return_attention_weights=True)
+                self.attention_weights = att
+            else:
+                x = F.elu(conv(x, edge_index))
+                x = F.dropout(x, p=0.1, training=self.training)
         
-        # Apply attention
-        h_attended = h.unsqueeze(-1) * attention.unsqueeze(1)  # Broadcasting
-        h_attended = h_attended.reshape(h.size(0), -1)
+        # Global aggregation (sum atoms into molecule)
+        x = global_add_pool(x, data.batch)
         
         # Predict
-        pred = self.predictor(h_attended)
+        pred = self.predictor(x)
         
         if return_attention:
-            return pred, attention
+            return pred, self.attention_weights
         
         return pred
     
@@ -272,10 +292,10 @@ class ReactionMechanismExplainer:
                     top_k = min(5, len(feature_names))
                     top_indices = attention_scores.argsort()[-top_k:][::-1]
                     
-                    explanation['top_features'] = [
-                        (feature_names[i], attention_scores[i])
+                    explanation['top_features'] = {
+                        feature_names[i]: float(attention_scores[i])
                         for i in top_indices
-                    ]
+                    }
         
         return explanation
 
@@ -361,7 +381,7 @@ def demonstrate_interpretability():
     print("-" * 80)
     
     # Create hybrid model for mechanism analysis
-    from src.models.novel.hybrid_model import HybridGNN
+    from chemdynamics.kinetics.novel.hybrid_model import HybridGNN
     
     hybrid_model = HybridGNN(node_features=37)
     temperature = torch.tensor([[323.15]])  # 50°C

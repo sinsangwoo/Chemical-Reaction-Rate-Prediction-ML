@@ -30,9 +30,12 @@ Repository = "https://github.com/sinsangwoo/Chemical-Reaction-Rate-Prediction-ML
 Homepage = "https://github.com/sinsangwoo/Chemical-Reaction-Rate-Prediction-ML"
 "Bug Tracker" = "https://github.com/sinsangwoo/Chemical-Reaction-Rate-Prediction-ML/issues"
 
-[tool.setuptools.packages.find]
-where = ["."]  
-include = ["src*"]
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["chemdynamics", "chemdynamics.cli", "chemdynamics.config", "chemdynamics.graphs", "chemdynamics.kinetics", "chemdynamics.simulation", "chemdynamics.analytics"]
+
+[project.scripts]
+chemdynamics = "chemdynamics.cli.main:app"
 
 [tool.black]
 line-length = 100

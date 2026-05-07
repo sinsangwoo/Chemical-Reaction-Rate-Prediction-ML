@@ -17,8 +17,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import MessagePassing
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any, Union
 import numpy as np
+
+# Internal framework imports
+from chemdynamics.graphs.gnn_models import create_gnn_model
 
 
 class ArrheniusLayer(nn.Module):
@@ -115,7 +118,8 @@ class HybridGNN(nn.Module):
         node_features: int = 37,
         hidden_dim: int = 128,
         num_layers: int = 3,
-        dropout: float = 0.1
+        dropout: float = 0.1,
+        gnn_type: str = "gin"
     ):
         """Initialize hybrid model.
         
@@ -124,22 +128,31 @@ class HybridGNN(nn.Module):
             hidden_dim: Hidden dimension size
             num_layers: Number of GNN layers
             dropout: Dropout rate
+            gnn_type: Type of GNN architecture to use ('gin', 'gcn', 'gat', 'mpnn')
         """
         super().__init__()
         
-        # Physics-based component
+        # Physics-based component: Modeling the fundamental Arrhenius rate
+        # This preserves the physical inductive bias of reaction kinetics.
         self.arrhenius = ArrheniusLayer(node_features)
         
-        # Data-driven component (simplified GNN)
-        self.gnn_layers = nn.ModuleList([
-            nn.Linear(node_features if i == 0 else hidden_dim, hidden_dim)
-            for i in range(num_layers)
-        ])
+        # Data-driven component: Real GNN architecture from graphs module.
+        # This replaces the previous 'placeholder' MLP with a scientifically valid
+        # graph topology encoder.
+        self.gnn = create_gnn_model(
+            model_type=gnn_type,
+            input_dim=node_features,
+            hidden_dim=hidden_dim,
+            num_layers=num_layers,
+            dropout=dropout
+        )
         
         self.dropout = nn.Dropout(dropout)
         
         # Fusion layer: combine physics + data
-        # Predicts correction factor
+        # Predicts correction factor to account for non-Arrhenius behavior.
+        # This is a residual-like structure where the GNN learns what the 
+        # Arrhenius equation fails to capture (e.g., complex structural effects).
         self.fusion = nn.Sequential(
             nn.Linear(hidden_dim + 1, hidden_dim),  # +1 for log_k_arrhenius
             nn.ReLU(),
@@ -147,33 +160,48 @@ class HybridGNN(nn.Module):
             nn.Linear(hidden_dim, 1)
         )
         
-        # Learn importance of physics vs data
+        # Learn importance of physics vs data via a trainable gating parameter.
+        # This allows the model to become more physics-heavy or data-heavy 
+        # depending on the specific reaction domain.
         self.physics_weight = nn.Parameter(torch.tensor(0.5))
     
     def forward(
         self,
-        x: torch.Tensor,
+        data: Union[torch.Tensor, Any],
         temperature: torch.Tensor,
         return_components: bool = False
     ) -> torch.Tensor:
         """Forward pass.
         
         Args:
-            x: Node features [batch, node_features]
+            data: Either node features [batch, node_features] or PyG Data object.
+                  If Tensor, it acts as a fallback for non-graph operations.
             temperature: Temperature [batch, 1]
             return_components: If True, return (prediction, physics, data, Ea)
         
         Returns:
             Prediction (and components if requested)
         """
-        # Physics-based prediction
-        log_k_physics, log_A, Ea = self.arrhenius(x, temperature)
+        # Extract features for physics component
+        # Note: Arrhenius layer currently uses global node feature aggregation
+        if hasattr(data, 'x'):
+            x = data.x
+            # Physics-based prediction expects a flattened batch feature
+            # In a real GNN simulation, we might pool the graph features here.
+            # For simplicity, we assume data.x is already pooled or we pool it.
+            if hasattr(data, 'batch'):
+                from torch_geometric.nn import global_mean_pool
+                x_pooled = global_mean_pool(data.x, data.batch)
+            else:
+                x_pooled = x
+        else:
+            x_pooled = data
+            
+        log_k_physics, log_A, Ea = self.arrhenius(x_pooled, temperature)
         
-        # Data-driven correction
-        h = x
-        for layer in self.gnn_layers:
-            h = F.relu(layer(h))
-            h = self.dropout(h)
+        # Data-driven correction using the real GNN module.
+        # This achievement decouples the model from simple linear approximations.
+        h = self.gnn(data)
         
         # Fuse physics + data
         # Concatenate physics prediction with learned features
