@@ -39,6 +39,40 @@ class BaseReactionModel(ABC):
             Predicted reaction rates
         """
         pass
+        
+    def get_activation_energy(self, X: np.ndarray) -> np.ndarray:
+        """Retrieve the predicted activation energy (Ea) if applicable.
+        
+        Design Intent: Physics-Informed Foundation Layer.
+        Models should expose thermodynamic parameters like Ea instead of just
+        black-box rates (k). This enables Arrhenius-consistent simulation
+        and thermodynamic validation.
+        
+        Returns:
+            Activation energy values.
+            Raises NotImplementedError if the model is purely data-driven
+            and does not extract physical parameters.
+        """
+        raise NotImplementedError(
+            f"Model {self.__class__.__name__} does not support "
+            f"activation energy extraction."
+        )
+        
+    def validate_thermodynamics(self, state: Dict[str, Any]) -> bool:
+        """Validate if the current predicted rates obey thermodynamic constraints.
+        
+        Design Intent: Provides a unified hook for checking physical consistency
+        (e.g., microscopic reversibility, non-negative rate constants) across
+        all kinetic models before simulation stepping.
+        
+        Args:
+            state: Current thermodynamic state (T, P, concentrations)
+            
+        Returns:
+            True if thermodynamically valid, False otherwise.
+        """
+        # Default implementation assumes validity, overridden by specific models
+        return True
 
     def save_model(self, filepath: str) -> None:
         """Save model to disk.

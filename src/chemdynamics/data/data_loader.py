@@ -80,3 +80,32 @@ class ReactionDataLoader:
         }
 
         return stats
+        
+    def preprocess_and_save(self, output_path: Path) -> pd.DataFrame:
+        """Explicitly define preprocessing boundaries and save the artifact.
+        
+        Design Intent: Data Lifecycle & Reproducibility.
+        Prevents 'implicit' preprocessing that gets lost between runs. 
+        Forces the pipeline to save the *exact* state of the data used for
+        downstream simulation or training, establishing clear lineage.
+        
+        Args:
+            output_path: Path to save the processed dataset artifact
+            
+        Returns:
+            Processed DataFrame
+        """
+        if self.data is None:
+            raise ValueError("Data not loaded. Call load_data() first.")
+            
+        # Example preprocessing boundary:
+        # In a full implementation, missing value imputation, normalization,
+        # and categorical encoding happen here.
+        processed_data = self.data.copy()
+        
+        # Save artifact for reproducibility
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        processed_data.to_csv(output_path, index=False)
+        print(f"Preprocessed artifact saved to {output_path}")
+        
+        return processed_data

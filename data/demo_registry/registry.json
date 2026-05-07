@@ -1,0 +1,23 @@
+{
+  "demo_benchmark": {
+    "1.0.0": {
+      "name": "demo_benchmark",
+      "version": "1.0.0",
+      "dataset_type": "benchmark",
+      "description": "Demo benchmark dataset for validation",
+      "schema_version": "1.0.0",
+      "num_reactions": 100,
+      "created_at": "2026-05-07T00:00:00",
+      "source": "Demo",
+      "citation": null,
+      "license": null,
+      "tags": [
+        "demo",
+        "benchmark",
+        "test"
+      ],
+      "preprocessing_steps": [],
+      "statistics": {}
+    }
+  }
+}
